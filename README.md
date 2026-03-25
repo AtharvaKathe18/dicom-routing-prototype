@@ -1,53 +1,317 @@
-# DICOM Routing Prototype with Metadata & Telemetry-Based Decisions
+# Diomede DICOM Prototype: Routing, Albums, and Metadata Query
 
 ## Overview
 
-This project implements a prototype DICOM routing middleware using `pynetdicom` and `pydicom`.
+This project implements a comprehensive DICOM middleware prototype aligned with GSoC 2026 projects #13, #14, and related discussions.
 
-Traditional DICOM workflows rely on static endpoints (fixed IP, port, AE Title), which limits flexibility in distributed systems.  
-This prototype explores how routing decisions can be made dynamically based on:
-
-- DICOM metadata (Modality, StudyDate, etc.)
-- Dataset characteristics (estimated size)
-- Runtime telemetry (node load, latency)
-- Node availability
-
-The goal is to simulate a foundation for intelligent, load-aware DICOM routing — aligned with research directions such as **Dynamic DICOM Endpoints (Diomede)**.
+**Key Features:**
+1. **Dynamic DICOM Routing** (#14) - Intelligent routing based on metadata, load, and availability
+2. **DICOM Album Creation** (#13) - Group and share DICOM studies/series
+3. **Metadata Extraction & Normalization** - Consistent schema for querying
+4. **DICOM Validation** - Ensure only valid files enter the system
+5. **Telemetry & Transfer Monitoring** - Track transfers, latency, throughput
 
 ---
 
 ## Architecture
+
+```
 Sender (SCU)
-│
-▼
-Router (SCP + SCU)
-│
-├──► Node A (localhost:11112)
-│ (large CT studies)
-│
-└──► Node B (localhost:11113)
+   │
+   ▼
+┌─────────────────────────┐
+│  DICOM Router           │
+│  ├─ C-STORE Handler     │  ◄── Receives DICOM files
+│  ├─ C-FIND Handler      │  ◄── Metadata queries
+│  ├─ Routing Engine      │  ◄── Metadata + Telemetry
+│  └─ Telemetry Tracker   │
+└─────────────────────────┘
+   │         │
+   ├────────┬┴─────────────┐
+   │        │              │
+   ▼        ▼              ▼
+ Node A   Node B     Album Manager
+ (SCP)    (SCP)      ├─ Validation
+                      ├─ Metadata Index
+                      ├─ Album Creation
+                      └─ Manifest Export
 
-
-### Components
-
-- **Sender**: Sends DICOM files via C-STORE
-- **Router**:
-  - Acts as SCP (receives datasets)
-  - Acts as SCU (forwards datasets)
-  - Applies routing logic
-- **Nodes**: Mock destination DICOM SCP servers
+```
 
 ---
 
-## Features
+## Modules
 
-### Metadata-aware routing
-- Uses Modality, PatientID, StudyDate
-- Example: CT studies routed differently
+### 1. **validation.py**
+DICOM file validation ensuring only valid files enter the system.
 
-### Size-aware routing
-- Estimates dataset size using `Rows × Columns`
-- Larger studies routed to specific nodes
+**Features:**
+- Single file validation with DICOM format checking
+- Required attribute verification (PatientID, StudyInstanceUID, etc.)
+- Batch directory validation
+
+**Usage:**
+```python
+from validation import validate_dicom_file, validate_dicom_directory
+
+# Single file
+is_valid, error = validate_dicom_file("~/patient_scan.dcm")
+
+# Directory scan
+results = validate_dicom_directory("/dicom/data", recursive=True)
+print(f"Valid: {len(results['valid_files'])}, Invalid: {len(results['invalid_files'])}")
+```
+
+---
+
+### 2. **metadata.py**
+Metadata extraction and normalization into consistent schema (addresses discussion #72).
+
+**Features:**
+- Normalized metadata class with safe field extraction
+- ISO 8601 date/time normalization
+- Study/Series hierarchy support (for album grouping)
+- Metadata caching for performance
+- Size estimation for routing decisions
+
+**Normalized Fields:**
+- Patient: ID, Name, Birth Date, Sex
+- Study: Study UID, Date, Time, Description, Physician
+- Series: Series UID, Number, Description, Modality, Body Part
+- SOP: Class UID, Instance UID, Instance Number
+- Image: Rows, Columns, Bits Allocated, Estimated Size
+
+**Usage:**
+```python
+from metadata import extract_normalized_metadata, group_by_study
+
+# Extract normalized metadata
+metadata = extract_normalized_metadata("~/patient_scan.dcm")
+print(f"Modality: {metadata.modality}")
+print(f"Study: {metadata.study_instance_uid}")
+print(f"Series: {metadata.series_instance_uid}")
+
+# Group files by Study/Series (for albums)
+files = ["/path/to/file1.dcm", "/path/to/file2.dcm"]
+grouped = group_by_study(files)
+# grouped[study_uid][series_uid] = [file_list]
+```
+
+---
+
+### 3. **album.py**
+Creates and manages shareable DICOM albums from local files (project #13).
+
+**Features:**
+- Static albums (snapshots at creation time)
+- Support for dynamic albums (query-driven, future)
+- Study/Series hierarchy
+- File validation on add
+- JSON manifest export (for Kheops integration)
+- Album metadata tracking
+
+**Workflow:**
+```python
+from album import AlbumManager, AlbumType
+
+# Create album manager
+mgr = AlbumManager(storage_dir="./albums")
+
+# Create new album
+album = mgr.create_album(
+    name="Chest CT Study 2026",
+    description="Multi-patient chest CT series",
+    album_type=AlbumType.STATIC
+)
+
+# Add files
+album.add_file("~/patient1_chest.dcm")
+album.add_files_from_directory("/dicom/data/chest_studies", recursive=True)
+
+# Export manifest for external sharing (Kheops)
+manifest_path = mgr.export_album_manifest(album.album_id)
+
+# Get album info
+print(f"Files: {album.get_file_count()}")
+print(f"Studies: {album.get_studies()}")
+print(f"Series: {album.get_series()}")
+```
+
+**Manifest Structure (for Kheops/REST API):**
+```json
+{
+  "album": {
+    "album_id": "uuid",
+    "name": "Album Name",
+    "file_count": 125,
+    "total_size_kb": 45000,
+    "created_at": "2026-03-25T10:30:00",
+    "studies": ["1.2.3.4.5.6"],
+    "series": ["1.2.3.4.5.6.7"]
+  },
+  "studies": {
+    "1.2.3.4.5.6": {
+      "series": ["1.2.3.4.5.6.7"]
+    }
+  },
+  "files": ["/path/to/file1.dcm", "/path/to/file2.dcm"],
+  "metadata_summary": {
+    "modalities": ["CT", "MR"],
+    "date_range": {"earliest": "2026-01-15", "latest": "2026-03-20"},
+    "total_size_kb": 45000
+  }
+}
+```
+
+---
+
+### 4. **router.py** (Original)
+Core DICOM routing middleware with C-STORE support.
+
+**Components:**
+- Metadata extraction
+- Node health checking (cached)
+- Load-aware routing engine
+- C-STORE forwarding with telemetry
+
+**Routing Strategy:**
+1. Avoid overloaded nodes (telemetry awareness)
+2. Check node availability with caching
+3. Route large CT studies to high-capacity nodes
+4. Default to least-loaded node
+5. Track latency per transfer
+
+---
+
+### 5. **router_enhanced.py**
+Extended router with C-FIND support and metadata indexing.
+
+**New Features:**
+- **C-FIND Query Support**: Metadata queries before routing
+- **Metadata Indexing**: In-memory index for query filtering
+- **Query Validation**: Filter on PatientID, StudyUID, SeriesUID, Modality, Date
+- **Transfer Logging**: Detailed transfer records with timestamps
+- **Telemetry Export**: JSON export for monitoring
+
+**Usage:**
+```bash
+# Start router with optional metadata indexing
+python router_enhanced.py --host localhost --port 11111 --index-dir ./dcm_data
+
+# Router now supports C-FIND queries
+```
+
+**Telemetry Export:**
+```python
+from router_enhanced import export_telemetry, get_telemetry_summary
+
+summary = get_telemetry_summary()
+# {
+#   "timestamp": "2026-03-25T10:30:00",
+#   "nodes": {"Node A": {...}, "Node B": {...}},
+#   "total_transfers": 100,
+#   "recent_transfers": [...]
+# }
+
+export_telemetry("./telemetry.json")
+```
+
+---
+
+## Quick Start
+
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Validate Local DICOM Data
+```bash
+python -c "
+from validation import validate_dicom_directory
+results = validate_dicom_directory('./demo', recursive=True)
+print(f'Valid: {results[\"summary\"][\"valid\"]}, Invalid: {results[\"summary\"][\"invalid\"]}')
+"
+```
+
+### 3. Create an Album from Local Data
+```bash
+python -c "
+from album import AlbumManager, AlbumType
+from validation import validate_dicom_directory
+
+mgr = AlbumManager('./albums')
+album = mgr.create_album('Test Album', 'Demo album')
+
+# Add validated files
+results = validate_dicom_directory('./demo')
+for f in results['valid_files'][:10]:
+    album.add_file(f)
+
+# Export
+mgr.export_album_manifest(album.album_id)
+print(f'Created album with {album.get_file_count()} files')
+"
+```
+
+### 4. Start Destination Nodes (in separate terminals)
+```bash
+# Terminal 1
+python node.py --name "Node A" --port 11112
+
+# Terminal 2
+python node.py --name "Node B" --port 11113
+```
+
+### 5. Start Router (in separate terminal)
+```bash
+# Basic routing
+python router.py
+
+# Or with metadata indexing
+python router_enhanced.py --index-dir ./demo
+```
+
+### 6. Send DICOM Files to Router
+```bash
+python sender.py ./demo/sample.dcm --host localhost --port 11111
+```
+
+---
+
+## GSoC Project Alignment
+
+| Project | Feature | Implementation |
+|---------|---------|-----------------|
+| #13 - DICOM Albums | Group by Study/Series | `album.py` + `metadata.py` |
+| #13 - Share Albums | JSON Manifest Export | `album.py:create_manifest()` |
+| #14 - Dynamic Endpoints | Load-aware Routing | `router.py:select_node()` |
+| #14 - Telemetry | Transfer Tracking | `router_enhanced.py` telemetry |
+| #61 - Metadata Routing | Modality/Size-based | `router.py:select_node()` |
+| #67 - Query Engine | Metadata Normalization | `metadata.py:NormalizedMetadata` |
+| #67 - Query Engine | C-FIND Support | `router_enhanced.py:execute_c_find_query()` |
+
+---
+
+## Future Enhancements
+
+1. **Kheops Integration** - REST API bridge for album sharing
+2. **Persistent Storage** - PostgreSQL/Redis for telemetry and album metadata
+3. **Dynamic Albums** - Query-driven albums (reproducible)
+4. **PHI Anonymization** - Automatic metadata scrubbing
+5. **DWiM Integration** - Automated workflow integration
+6. **C-MOVE Support** - Query/retrieve operations
+7. **Authentication** - OAuth/token-based access for shared albums
+8. **Visualization** - Web UI for album browsing
+
+---
+
+## References
+
+- [Diomede Repository](https://github.com/KathiraveluLab/Diomede)
+- [GSoC 2026 Projects](https://github.com/uaanchorage/GSoC)
+- [pynetdicom Documentation](https://pynetdicom.readthedocs.io/)
+- [DICOM Standard](https://www.dicomstandard.org/)
 
 ### Telemetry-based load balancing
 - Tracks per-node request counts
