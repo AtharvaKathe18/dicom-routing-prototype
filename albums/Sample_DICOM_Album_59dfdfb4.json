@@ -1,0 +1,42 @@
+{
+  "album": {
+    "album_id": "59dfdfb4-6684-42dd-9b63-c3004e82de47",
+    "name": "Sample DICOM Album",
+    "description": "Demo album created from sample DICOM file",
+    "album_type": "static",
+    "created_at": "2026-03-25T10:54:50.493657",
+    "modified_at": "2026-03-25T10:54:50.505391",
+    "creator": "demo_script",
+    "studies": [
+      "1.2.3.4.5.6"
+    ],
+    "series": [
+      "1.2.3.4.5.6.7"
+    ],
+    "file_count": 1,
+    "total_size_kb": 1024.0,
+    "tags": [],
+    "sharable_url": null,
+    "query_criteria": null
+  },
+  "studies": {
+    "1.2.3.4.5.6": {
+      "series": [
+        "1.2.3.4.5.6.7"
+      ]
+    }
+  },
+  "files": [
+    "demo\\sample.dcm"
+  ],
+  "metadata_summary": {
+    "modalities": [
+      "CT"
+    ],
+    "date_range": {
+      "earliest": "2026-03-25",
+      "latest": "2026-03-25"
+    },
+    "total_size_kb": 1024.0
+  }
+}

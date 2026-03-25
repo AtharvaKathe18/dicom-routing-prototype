@@ -1,0 +1,42 @@
+{
+  "album": {
+    "album_id": "59973ac6-6c5a-4348-bac6-306a6236be31",
+    "name": "Demo Study Group",
+    "description": "Grouped by StudyInstanceUID and SeriesInstanceUID",
+    "album_type": "static",
+    "created_at": "2026-03-25T10:55:18.529746",
+    "modified_at": "2026-03-25T10:55:18.534148",
+    "creator": "system",
+    "studies": [
+      "1.2.3.4.5.6"
+    ],
+    "series": [
+      "1.2.3.4.5.6.7"
+    ],
+    "file_count": 1,
+    "total_size_kb": 512.0,
+    "tags": [],
+    "sharable_url": null,
+    "query_criteria": null
+  },
+  "studies": {
+    "1.2.3.4.5.6": {
+      "series": [
+        "1.2.3.4.5.6.7"
+      ]
+    }
+  },
+  "files": [
+    "./demo/sample.dcm"
+  ],
+  "metadata_summary": {
+    "modalities": [
+      "CT"
+    ],
+    "date_range": {
+      "earliest": "2026-03-25",
+      "latest": "2026-03-25"
+    },
+    "total_size_kb": 512.0
+  }
+}
